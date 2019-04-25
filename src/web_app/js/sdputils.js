@@ -9,7 +9,7 @@
 /* More information about these options at jshint.com/docs/options */
 
 /* globals  adapter, trace */
-/* exported setCodecParam, iceCandidateType, formatTypePreference,
+/* exported setCodecParam, iceCandidateType,
    maybeSetOpusOptions, maybePreferAudioReceiveCodec,
    maybePreferAudioSendCodec, maybeSetAudioReceiveBitRate,
    maybeSetAudioSendBitRate, maybePreferVideoReceiveCodec,
@@ -32,33 +32,6 @@ function mergeConstraints(cons1, cons2) {
 
 function iceCandidateType(candidateStr) {
   return candidateStr.split(' ')[7];
-}
-
-// Turns the local type preference into a human-readable string.
-// Note that this mapping is browser-specific.
-function formatTypePreference(pref) {
-  if (adapter.browserDetails.browser === 'chrome') {
-    switch (pref) {
-      case 0:
-        return 'TURN/TLS';
-      case 1:
-        return 'TURN/TCP';
-      case 2:
-        return 'TURN/UDP';
-      default:
-        break;
-    }
-  } else if (adapter.browserDetails.browser === 'firefox') {
-    switch (pref) {
-      case 0:
-        return 'TURN/TCP';
-      case 5:
-        return 'TURN/UDP';
-      default:
-        break;
-    }
-  }
-  return '';
 }
 
 function maybeSetOpusOptions(sdp, params) {
@@ -330,9 +303,23 @@ function maybePreferCodec(sdp, type, dir, codec) {
   }
 
   // If the codec is available, set it as the default in m line.
-  var payload = getCodecPayloadType(sdpLines, codec);
-  if (payload) {
-    sdpLines[mLineIndex] = setDefaultCodec(sdpLines[mLineIndex], payload);
+  var payload = null;
+  // Iterate through rtpmap enumerations to find all matching codec entries
+  for (var i = sdpLines.length-1; i >= 0 ; --i) {
+    // Finds first match in rtpmap
+    var index = findLineInRange(sdpLines, i, 0, 'a=rtpmap', codec, 'desc');
+    if (index !== null) {
+      // Skip all of the entries between i and index match
+      i = index;
+      payload = getCodecPayloadTypeFromLine(sdpLines[index]);
+      if (payload) {
+        // Move codec to top
+        sdpLines[mLineIndex] = setDefaultCodec(sdpLines[mLineIndex], payload);
+      }
+    } else {
+      // No match means we can break the loop
+      break;
+    }
   }
 
   sdp = sdpLines.join('\r\n');
@@ -450,13 +437,40 @@ function findLine(sdpLines, prefix, substr) {
 
 // Find the line in sdpLines[startLine...endLine - 1] that starts with |prefix|
 // and, if specified, contains |substr| (case-insensitive search).
-function findLineInRange(sdpLines, startLine, endLine, prefix, substr) {
-  var realEndLine = endLine !== -1 ? endLine : sdpLines.length;
-  for (var i = startLine; i < realEndLine; ++i) {
-    if (sdpLines[i].indexOf(prefix) === 0) {
-      if (!substr ||
-          sdpLines[i].toLowerCase().indexOf(substr.toLowerCase()) !== -1) {
-        return i;
+function findLineInRange(
+  sdpLines,
+  startLine,
+  endLine,
+  prefix,
+  substr,
+  direction
+) {
+  if (direction === undefined) {
+    direction = 'asc';
+  }
+
+  direction = direction || 'asc';
+
+  if (direction === 'asc') {
+    // Search beginning to end
+    var realEndLine = endLine !== -1 ? endLine : sdpLines.length;
+    for (var i = startLine; i < realEndLine; ++i) {
+      if (sdpLines[i].indexOf(prefix) === 0) {
+        if (!substr ||
+            sdpLines[i].toLowerCase().indexOf(substr.toLowerCase()) !== -1) {
+          return i;
+        }
+      }
+    }
+  } else {
+    // Search end to beginning
+    var realStartLine = startLine !== -1 ? startLine : sdpLines.length-1;
+    for (var j = realStartLine; j >= 0; --j) {
+      if (sdpLines[j].indexOf(prefix) === 0) {
+        if (!substr ||
+            sdpLines[j].toLowerCase().indexOf(substr.toLowerCase()) !== -1) {
+          return j;
+        }
       }
     }
   }
